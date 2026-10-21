@@ -2,3 +2,5 @@ Flask==3.1.2
 gunicorn==23.0.0
 gspread==6.2.1
 google-auth==2.41.1
+openpyxl==3.1.5
+reportlab==4.4.4

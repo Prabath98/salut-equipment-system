@@ -1,8 +1,17 @@
 import os, json, secrets, threading
 from datetime import datetime, timezone
 from functools import wraps
-from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
+from flask import Flask, render_template, request, redirect, url_for, session, flash, abort, send_file
 import gspread
+from io import BytesIO
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
+from openpyxl.utils import get_column_letter
 from google.oauth2.service_account import Credentials
 
 app = Flask(__name__)
@@ -206,6 +215,92 @@ def categories_view():
         elif book:
             book.worksheet('Categories').append_row([name]); flash('Category added.', 'success'); return redirect(url_for('categories_view'))
     return render_template('categories.html', categories=categories)
+
+
+
+def _export_rows(kind):
+    book, inventory, transactions, categories = get_data()
+    if kind == 'inventory':
+        headers = HEADERS['Inventory']
+        data = [[str(item.get(h, '') or '') for h in headers] for item in inventory]
+        title = 'SaLUT Equipment Inventory'
+    else:
+        headers = HEADERS['Transactions']
+        data = [[str(item.get(h, '') or '') for h in headers] for item in transactions]
+        title = 'SaLUT Transaction History'
+    return headers, data, title
+
+def _excel_export(headers, data, title, filename):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = 'Inventory' if 'Inventory' in title else 'Transactions'
+    ws.sheet_view.showGridLines = False
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
+    cell = ws.cell(1, 1, title)
+    cell.font = Font(name='Aptos Display', size=18, bold=True, color='FFFFFF')
+    cell.fill = PatternFill('solid', fgColor='302A27')
+    cell.alignment = Alignment(vertical='center')
+    ws.row_dimensions[1].height = 34
+    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(headers))
+    subtitle = ws.cell(2, 1, f"Generated {datetime.now().astimezone().strftime('%d %b %Y, %H:%M')} · SaLUT Equipment Management")
+    subtitle.font = Font(italic=True, size=10, color='666666')
+    for col, header in enumerate(headers, 1):
+        c = ws.cell(4, col, header)
+        c.font = Font(bold=True, color='302A27')
+        c.fill = PatternFill('solid', fgColor='FFD84A')
+        c.alignment = Alignment(wrap_text=True, vertical='center')
+        c.border = Border(bottom=Side(style='thin', color='263B7A'))
+    for r_idx, row in enumerate(data, 5):
+        for c_idx, value in enumerate(row, 1):
+            c = ws.cell(r_idx, c_idx, value)
+            c.alignment = Alignment(vertical='top', wrap_text=True)
+            if r_idx % 2 == 0: c.fill = PatternFill('solid', fgColor='F5F6F8')
+    ws.freeze_panes = 'A5'
+    ws.auto_filter.ref = f"A4:{get_column_letter(len(headers))}{max(4, 4 + len(data))}"
+    for idx, header in enumerate(headers, 1):
+        samples = [len(str(header))] + [len(str(row[idx-1] or '')) for row in data[:250]]
+        ws.column_dimensions[get_column_letter(idx)].width = min(max(max(samples, default=12) + 2, 13), 32)
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.orientation = 'landscape'
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    output = BytesIO(); wb.save(output); output.seek(0)
+    return send_file(output, as_attachment=True, download_name=filename, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+def _pdf_export(headers, data, title, filename):
+    output = BytesIO()
+    page_size = landscape(A4) if len(headers) > 7 else A4
+    doc = SimpleDocTemplate(output, pagesize=page_size, rightMargin=10*mm, leftMargin=10*mm, topMargin=12*mm, bottomMargin=12*mm, title=title, author='SaLUT Equipment Management')
+    styles = getSampleStyleSheet()
+    heading = ParagraphStyle('SaLUTTitle', parent=styles['Title'], textColor=colors.HexColor('#302A27'), fontName='Helvetica-Bold', fontSize=17, alignment=0, spaceAfter=4)
+    small = ParagraphStyle('SaLUTSmall', parent=styles['Normal'], textColor=colors.HexColor('#666666'), fontSize=8, spaceAfter=10)
+    cell_style = ParagraphStyle('SaLUTCell', parent=styles['Normal'], fontSize=6.5, leading=8, wordWrap='CJK')
+    story = [Paragraph(title, heading), Paragraph(f"Generated {datetime.now().astimezone().strftime('%d %b %Y, %H:%M')} · SaLUT Equipment Management", small)]
+    table_data = [[Paragraph(str(h).replace('&','&amp;'), cell_style) for h in headers]]
+    for row in data:
+        table_data.append([Paragraph(str(v or '—').replace('&','&amp;').replace('<','&lt;').replace('>','&gt;'), cell_style) for v in row])
+    available_width = page_size[0] - 20*mm
+    col_widths = [available_width / len(headers)] * len(headers)
+    table = Table(table_data, repeatRows=1, colWidths=col_widths, hAlign='LEFT')
+    table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#FFD84A')),('TEXTCOLOR',(0,0),(-1,0),colors.HexColor('#302A27')),('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),('GRID',(0,0),(-1,-1),0.35,colors.HexColor('#D9DDE5')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),4),('RIGHTPADDING',(0,0),(-1,-1),4),('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F5F6F8')])]))
+    story.extend([table])
+    doc.build(story)
+    output.seek(0)
+    return send_file(output, as_attachment=True, download_name=filename, mimetype='application/pdf')
+
+@app.route('/export/<kind>/<file_format>')
+def export_data(kind, file_format):
+    if kind not in ('inventory', 'transactions') or file_format not in ('xlsx', 'pdf'):
+        abort(404)
+    try:
+        headers, data, title = _export_rows(kind)
+        filename = f"salut_{kind}_{datetime.now().strftime('%Y%m%d_%H%M')}.{file_format}"
+        if file_format == 'xlsx': return _excel_export(headers, data, title, filename)
+        return _pdf_export(headers, data, title, filename)
+    except Exception as e:
+        app.logger.exception('Export failed')
+        flash(f'Unable to export {kind}: {e}', 'error')
+        return redirect(url_for('inventory_add' if kind == 'inventory' else 'transactions_view'))
 
 @app.route('/health')
 def health(): return {'status':'ok'}, 200
