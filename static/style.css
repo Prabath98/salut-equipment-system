@@ -5,3 +5,24 @@
 /* SaLUT brand theme: charcoal, gold, navy and white */
 .topbar{border-bottom:3px solid #ffd84a}.action-card:hover{border-color:#d8b72e;box-shadow:0 10px 28px rgba(48,42,39,.12)}.button-primary,.btn-primary,button[type="submit"]{background:#302a27;color:#fff;border-color:#302a27}.button-primary:hover,.btn-primary:hover,button[type="submit"]:hover{background:#263b7a;border-color:#263b7a}.count-pill{background:#fff4c2;color:#302a27}
 @media(max-width:520px){.brand-logo{width:min(260px,62vw);max-height:56px}.topbar{padding:10px 14px}}
+
+/* Equipment movement selector improvements */
+.equipment-list{width:100%;max-height:420px;overflow-y:auto;overflow-x:hidden;padding:1px 4px 1px 1px}
+.stack .equipment-row,.equipment-row{width:100%;min-width:0;display:flex;flex-direction:row;align-items:center;justify-content:flex-start;gap:14px;padding:14px 16px;text-align:left}
+.equipment-row input[type=checkbox]{width:20px;height:20px;flex:0 0 20px;margin:0}
+.equipment-info{flex:1 1 auto;min-width:0;text-align:left}
+.equipment-info b{overflow-wrap:anywhere}
+.equipment-row .status{flex:0 0 auto;margin-left:auto;white-space:nowrap}
+.equipment-row:has(input:checked){border-color:var(--blue);background:#f1f4ff;box-shadow:0 0 0 1px rgba(38,59,122,.12)}
+.selected-summary{border:1px solid var(--line);border-radius:12px;padding:14px;background:#fcfcfa}
+.selected-summary-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.selected-summary-head h3{font-size:14px;margin:0}
+.selected-summary-head span{font-size:12px;font-weight:750;color:var(--blue)}
+.selected-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.selected-item{min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px;border:1px solid #dce2f5;border-radius:9px;background:#fff}
+.selected-item>span{min-width:0}
+.selected-item b,.selected-item small{display:block;overflow-wrap:anywhere}
+.selected-item b{font-size:12px}
+.selected-item small{font-size:11px;color:var(--muted);margin-top:2px}
+.selected-remove{flex-shrink:0;border:0;background:#f0f1f5;color:#263b7a;border-radius:7px;padding:6px 8px;font-size:11px;font-weight:750;cursor:pointer}
+@media(max-width:650px){.stack .equipment-row,.equipment-row{width:100%;flex-direction:row;align-items:center;padding:12px 10px;gap:9px}.equipment-info b{font-size:13px}.equipment-row .status{font-size:9px;padding:4px 6px}.selected-items{grid-template-columns:1fr}.equipment-list{max-height:380px}}
