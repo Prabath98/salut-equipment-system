@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block title %}{{ code }} · SaLUT{% endblock %}{% block content %}<section class="login-wrap"><div class="login-card"><div class="eyebrow">REQUEST COULD NOT BE COMPLETED</div><h1>{{ code }}</h1><p>{{ message }}</p><a class="btn primary full" href="{{ url_for('home') if logged_user else url_for('login') }}">Return</a></div></section>{% endblock %}
