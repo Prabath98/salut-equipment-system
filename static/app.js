@@ -28,3 +28,18 @@
   });
   updateCount();
 })();
+
+
+const inventorySearch = document.getElementById('inventory-search');
+const inventoryCategory = document.getElementById('inventory-category-filter');
+function filterInventory() {
+  const query = (inventorySearch?.value || '').trim().toLowerCase();
+  const category = inventoryCategory?.value || '';
+  document.querySelectorAll('#inventory-table tbody tr').forEach(row => {
+    const matchesText = (row.dataset.name || '').includes(query) || (row.dataset.id || '').includes(query);
+    const matchesCategory = !category || row.dataset.category === category;
+    row.hidden = !(matchesText && matchesCategory);
+  });
+}
+inventorySearch?.addEventListener('input', filterInventory);
+inventoryCategory?.addEventListener('change', filterInventory);
