@@ -301,11 +301,18 @@ def export_data(kind, file_format):
             if kind == 'inventory':
                 data = [
                     row for row in data
-                    if (not query or query in ' '.join(str(value) for value in row).casefold())
+                    if (not query or query in f"{row[0]} {row[1]}".casefold())
                     and (not category or (len(row) > 2 and str(row[2]).casefold() == category))
                 ]
             else:
-                data = [row for row in data if not query or query in ' '.join(str(value) for value in row).casefold()]
+                # Match the fields displayed in the transaction-history table.
+                visible_columns = (1, 2, 3, 4, 5, 6, 7, 8, 9, 13)
+                data = [
+                    row for row in data
+                    if not query or query in ' '.join(
+                        str(row[i]) for i in visible_columns if i < len(row)
+                    ).casefold()
+                ]
             title += ' — Filtered Results'
         filename = f"salut_{kind}_{datetime.now().strftime('%Y%m%d_%H%M')}.{file_format}"
         if file_format == 'xlsx': return _excel_export(headers, data, title, filename)
