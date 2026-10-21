@@ -97,7 +97,8 @@ def movement(action):
     try: book, inventory, transactions, categories = get_data()
     except Exception as e:
         app.logger.exception('Data load failed'); flash(f'Unable to connect to Google Sheets. Check deployment configuration. {e}', 'error'); return render_template('movement.html', action=action, items=[], categories=DEFAULT_CATEGORIES)
-    wanted = 'OUT' if action == 'out' else 'IN'
+    # Sign IN must select equipment currently OUT; Sign OUT must select equipment currently IN.
+    wanted = 'OUT' if action == 'in' else 'IN'
     available = [i for i in inventory if status_is(i,wanted)]
     if request.method == 'POST':
         ids = list(dict.fromkeys(request.form.getlist('equipment_ids')))
