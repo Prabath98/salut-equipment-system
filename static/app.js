@@ -7,11 +7,21 @@
   const selectedSummaryCount = document.getElementById('selected-summary-count');
   function filterItems() {
     if (!list) return;
-    const q = (search?.value || '').trim().toLowerCase();
-    const cat = category?.value || '';
+    const q = String(search?.value || '').trim().toLocaleLowerCase();
+    const cat = String(category?.value || '').trim().toLocaleLowerCase();
     list.querySelectorAll('.equipment-row').forEach(row => {
-      row.hidden = !(row.dataset.name.includes(q) || row.dataset.id.includes(q)) || (cat && row.dataset.category !== cat);
+      const name = String(row.dataset.name || row.querySelector('.equipment-info b')?.textContent || '').toLocaleLowerCase();
+      const id = String(row.dataset.id || '').toLocaleLowerCase();
+      const rowCategory = String(row.dataset.category || '').toLocaleLowerCase();
+      const matchesText = !q || name.includes(q) || id.includes(q);
+      const matchesCategory = !cat || rowCategory === cat;
+      row.hidden = !(matchesText && matchesCategory);
     });
+    const visibleRows = [...list.querySelectorAll('.equipment-row')].filter(row => !row.hidden);
+    let empty = list.querySelector('[data-filter-empty]');
+    if (!visibleRows.length && list.querySelector('.equipment-row')) {
+      if (!empty) { empty = document.createElement('div'); empty.className = 'empty-state'; empty.dataset.filterEmpty = 'true'; empty.textContent = 'No equipment matches your search or category.'; list.appendChild(empty); }
+    } else if (empty) empty.remove();
   }
   function updateCount() {
     if (!list) return;
@@ -48,7 +58,10 @@
       }
     }
   }
-  search?.addEventListener('input', filterItems); category?.addEventListener('change', filterItems);
+  search?.addEventListener('input', filterItems);
+  search?.addEventListener('search', filterItems);
+  category?.addEventListener('change', filterItems);
+  filterItems();
   list?.addEventListener('change', e => { if (e.target.matches('input[type=checkbox]')) updateCount(); });
   document.querySelectorAll('[data-clear-form]').forEach(button => button.addEventListener('click', () => {
     const form = button.closest('form'); if (!form) return;
@@ -72,10 +85,13 @@ function filterInventory() {
   const query = (inventorySearch?.value || '').trim().toLowerCase();
   const category = inventoryCategory?.value || '';
   document.querySelectorAll('#inventory-table tbody tr').forEach(row => {
-    const matchesText = (row.dataset.name || '').includes(query) || (row.dataset.id || '').includes(query);
+    const name = String(row.dataset.name || row.cells?.[1]?.innerText || '').toLowerCase();
+    const id = String(row.dataset.id || row.cells?.[0]?.innerText || '').toLowerCase();
+    const matchesText = name.includes(query) || id.includes(query);
     const matchesCategory = !category || row.dataset.category === category;
     row.hidden = !(matchesText && matchesCategory);
   });
 }
 inventorySearch?.addEventListener('input', filterInventory);
 inventoryCategory?.addEventListener('change', filterInventory);
+filterInventory();
