@@ -12,8 +12,8 @@ services:
       - key: COOKIE_SECURE
         value: "true"
       - key: GOOGLE_SHEET_ID
-        sync: false
+        value: "12WJ241c-d2Jm_4B-BYPaeNN8K8num5dlVCQWANezsi8"
       - key: GOOGLE_SERVICE_ACCOUNT_JSON
         sync: false
-      - key: USERS_JSON
+      - key: MANAGER_PASSWORD_HASH
         sync: false

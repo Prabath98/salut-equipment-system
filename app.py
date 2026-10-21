@@ -59,25 +59,13 @@ def current_user(): return session.get('user')
 def manager_required(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
-        if not current_user(): return redirect(url_for('login', next=request.path))
-        if session.get('role') != 'manager': abort(403)
+        if session.get('role') != 'manager':
+            return redirect(url_for('manager_login', next=request.path))
         return fn(*args, **kwargs)
     return wrapper
 
-def login_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not current_user(): return redirect(url_for('login', next=request.path))
-        return fn(*args, **kwargs)
-    return wrapper
-
-def configured_users():
-    """Users are configured as JSON: [{username, role, password_hash}]. Hashes generated with werkzeug.security.generate_password_hash."""
-    raw = os.environ.get('USERS_JSON','').strip()
-    if not raw: return []
-    data = json.loads(raw)
-    if not isinstance(data, list): raise RuntimeError('USERS_JSON must be a JSON array.')
-    return data
+def configured_manager_hash():
+    return os.environ.get('MANAGER_PASSWORD_HASH', '').strip()
 
 def get_data():
     book = book_ready()
@@ -91,35 +79,37 @@ def status_is(item, wanted): return str(item.get('Current Status','')).strip().u
 def append_transaction(book, item, action, fields):
     ws = book.worksheet('Transactions')
     now = datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
-    row = [secrets.token_hex(5).upper(), now, action, item.get('Equipment ID',''), item.get('Item Name',''), item.get('Category',''), fields.get('person','').strip(), fields.get('location','').strip(), fields.get('project','').strip(), fields.get('requester','').strip(), fields.get('project_location','').strip(), fields.get('unit','').strip(), fields.get('notes','').strip(), current_user() or 'system']
+    row = [secrets.token_hex(5).upper(), now, action, item.get('Equipment ID',''), item.get('Item Name',''), item.get('Category',''), fields.get('person','').strip(), fields.get('location','').strip(), fields.get('project','').strip(), fields.get('requester','').strip(), fields.get('project_location','').strip(), fields.get('unit','').strip(), fields.get('notes','').strip(), current_user() or 'public employee']
     ws.append_row(row, value_input_option='USER_ENTERED')
 
 @app.context_processor
 def inject_globals(): return {'logged_user': current_user(), 'logged_role': session.get('role'), 'locations': LOCATIONS}
 
-@app.route('/login', methods=['GET','POST'])
-def login():
+@app.route('/manager', methods=['GET','POST'])
+def manager_login():
+    if session.get('role') == 'manager':
+        return redirect(url_for('dashboard'))
     if request.method == 'POST':
-        username = request.form.get('username','').strip()
-        password = request.form.get('password','')
-        user = next((u for u in configured_users() if u.get('username') == username), None)
-        if user and user.get('role') in ('employee','manager') and user.get('password_hash') and check_password_hash(user['password_hash'], password):
-            session.clear(); session['user'] = username; session['role'] = user['role']; session.permanent = True
-            dest = request.args.get('next','')
-            if not dest.startswith('/') or dest.startswith('//'): dest = url_for('home')
+        password = request.form.get('password', '')
+        password_hash = configured_manager_hash()
+        if password_hash and check_password_hash(password_hash, password):
+            session.clear(); session['user'] = 'manager'; session['role'] = 'manager'; session.permanent = True
+            dest = request.args.get('next', '')
+            if not dest.startswith('/') or dest.startswith('//'):
+                dest = url_for('dashboard')
             return redirect(dest)
-        flash('Incorrect username or password.', 'error')
-    return render_template('login.html')
+        flash('Incorrect manager password, or manager access has not been configured.', 'error')
+    return render_template('login.html', manager_login=True)
 
-@app.route('/logout', methods=['POST'])
-@login_required
-def logout(): session.clear(); return redirect(url_for('login'))
+@app.route('/manager/logout', methods=['POST'])
+def manager_logout():
+    if session.get('role') == 'manager': session.clear()
+    return redirect(url_for('home'))
 
 @app.route('/')
-@login_required
 def home(): return render_template('home.html')
 
-@app.route('/dashboard')
+@app.route('/manager/dashboard')
 @manager_required
 def dashboard():
     try:
@@ -131,7 +121,6 @@ def dashboard():
         app.logger.exception('Dashboard load failed'); flash(f'Unable to load Google Sheets data: {e}', 'error'); return render_template('dashboard.html', counts={'total':0,'in':0,'out':0,'categories':0}, recent=[])
 
 @app.route('/movement/<action>', methods=['GET','POST'])
-@login_required
 def movement(action):
     if action not in ('in','out'): abort(404)
     try: book, inventory, transactions, categories = get_data()
@@ -170,7 +159,6 @@ def movement(action):
     return render_template('movement.html', action=action, items=available, categories=categories)
 
 @app.route('/inventory', methods=['GET','POST'])
-@login_required
 def inventory_add():
     try: book, inventory, transactions, categories = get_data()
     except Exception as e:
@@ -190,7 +178,7 @@ def inventory_add():
                         try: nums.append(int(eid[len(prefix):]))
                         except ValueError: pass
                 eid=prefix+f'{max(nums,default=0)+1:04d}'
-                book.worksheet('Inventory').append_row([eid,name,category,'IN',location,datetime.now().astimezone().isoformat(timespec='seconds'),current_user()],value_input_option='USER_ENTERED')
+                book.worksheet('Inventory').append_row([eid,name,category,'IN',location,datetime.now().astimezone().isoformat(timespec='seconds'),current_user() or 'public employee'],value_input_option='USER_ENTERED')
             flash(f'Equipment added. ID: {eid}', 'success'); return redirect(url_for('inventory_add'))
     return render_template('inventory.html', categories=categories, inventory=list(reversed(inventory[-20:])))
 
