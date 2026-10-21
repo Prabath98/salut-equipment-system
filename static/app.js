@@ -95,3 +95,23 @@ function filterInventory() {
 inventorySearch?.addEventListener('input', filterInventory);
 inventoryCategory?.addEventListener('change', filterInventory);
 filterInventory();
+
+
+// Append the current page filters to export links so exports match visible rows.
+function updateFilteredExportLinks() {
+  document.querySelectorAll('a[href*="/export/inventory/"]').forEach(link => {
+    const url = new URL(link.href, window.location.href);
+    url.searchParams.set('q', document.getElementById('inventory-search')?.value || '');
+    url.searchParams.set('category', document.getElementById('inventory-category-filter')?.value || '');
+    link.href = url.pathname + url.search;
+  });
+  document.querySelectorAll('a[href*="/export/transactions/"]').forEach(link => {
+    const url = new URL(link.href, window.location.href);
+    url.searchParams.set('q', document.getElementById('history-search')?.value || '');
+    link.href = url.pathname + url.search;
+  });
+}
+document.getElementById('inventory-search')?.addEventListener('input', updateFilteredExportLinks);
+document.getElementById('inventory-category-filter')?.addEventListener('change', updateFilteredExportLinks);
+document.getElementById('history-search')?.addEventListener('input', updateFilteredExportLinks);
+updateFilteredExportLinks();
