@@ -2,7 +2,6 @@ import os, json, secrets, threading
 from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, abort
-from werkzeug.security import check_password_hash
 import gspread
 from google.oauth2.service_account import Credentials
 
@@ -55,17 +54,7 @@ def rows(book, name):
     data = book.worksheet(name).get_all_records()
     return data
 
-def current_user(): return session.get('user')
-def manager_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if session.get('role') != 'manager':
-            return redirect(url_for('manager_login', next=request.path))
-        return fn(*args, **kwargs)
-    return wrapper
-
-def configured_manager_hash():
-    return os.environ.get('MANAGER_PASSWORD_HASH', '').strip()
+def current_user(): return 'public user'
 
 def get_data():
     book = book_ready()
@@ -85,32 +74,14 @@ def append_transaction(book, item, action, fields):
 @app.context_processor
 def inject_globals(): return {'logged_user': current_user(), 'logged_role': session.get('role'), 'locations': LOCATIONS}
 
-@app.route('/manager', methods=['GET','POST'])
-def manager_login():
-    if session.get('role') == 'manager':
-        return redirect(url_for('dashboard'))
-    if request.method == 'POST':
-        password = request.form.get('password', '')
-        password_hash = configured_manager_hash()
-        if password_hash and check_password_hash(password_hash, password):
-            session.clear(); session['user'] = 'manager'; session['role'] = 'manager'; session.permanent = True
-            dest = request.args.get('next', '')
-            if not dest.startswith('/') or dest.startswith('//'):
-                dest = url_for('dashboard')
-            return redirect(dest)
-        flash('Incorrect manager password, or manager access has not been configured.', 'error')
-    return render_template('login.html', manager_login=True)
-
-@app.route('/manager/logout', methods=['POST'])
-def manager_logout():
-    if session.get('role') == 'manager': session.clear()
-    return redirect(url_for('home'))
+@app.route('/manager')
+def manager_entry():
+    return redirect(url_for('dashboard'))
 
 @app.route('/')
 def home(): return render_template('home.html')
 
 @app.route('/manager/dashboard')
-@manager_required
 def dashboard():
     try:
         _, inventory, transactions, categories = get_data()
@@ -183,14 +154,12 @@ def inventory_add():
     return render_template('inventory.html', categories=categories, inventory=list(reversed(inventory[-20:])))
 
 @app.route('/transactions')
-@manager_required
 def transactions_view():
     try: _, inventory, transactions, categories = get_data()
     except Exception as e: flash(f'Unable to load transaction history: {e}', 'error'); transactions=[]
     return render_template('transactions.html', transactions=list(reversed(transactions)))
 
 @app.route('/categories', methods=['GET','POST'])
-@manager_required
 def categories_view():
     try: book, inventory, transactions, categories = get_data()
     except Exception as e: flash(f'Unable to load categories: {e}', 'error'); categories=DEFAULT_CATEGORIES; book=None
