@@ -114,7 +114,7 @@ def movement(action):
                 fresh = rows(book,'Inventory')
                 ws=book.worksheet('Inventory')
                 all_values=ws.get_all_values(); header=all_values[0] if all_values else []
-                status_col=header.index('Current Status')+1; id_col=header.index('Equipment ID')+1
+                status_col=header.index('Current Status')+1; id_col=header.index('Equipment ID')+1; location_col=header.index('Current Location')+1
                 for eid in ids:
                     item=next((i for i in fresh if str(i.get('Equipment ID','')) == eid),None)
                     if not item or not status_is(item,wanted): conflicts.append(eid); continue
@@ -122,6 +122,8 @@ def movement(action):
                     if not row_num: conflicts.append(eid); continue
                     new_status='OUT' if action=='out' else 'IN'
                     ws.update_cell(row_num,status_col,new_status)
+                    # Assign the current location only when equipment is signed out; clear it when returned.
+                    ws.update_cell(row_num,location_col,fields.get('location','').strip() if action=='out' else '')
                     append_transaction(book,item,'SIGN OUT' if action=='out' else 'SIGN IN',fields)
                     completed.append(eid)
             if completed: flash(f'{len(completed)} item(s) successfully signed {"out" if action=="out" else "in"}.', 'success')
@@ -135,8 +137,8 @@ def inventory_add():
     except Exception as e:
         flash(f'Unable to connect to Google Sheets: {e}', 'error'); return render_template('inventory.html', categories=DEFAULT_CATEGORIES, inventory=[])
     if request.method == 'POST':
-        name=request.form.get('name','').strip(); category=request.form.get('category','').strip(); location=request.form.get('location','').strip()
-        if not name or category not in categories or location not in LOCATIONS: flash('Enter a name and select a valid category and location.', 'error')
+        name=request.form.get('name','').strip(); category=request.form.get('category','').strip()
+        if not name or category not in categories: flash('Enter an item name and select a valid category.', 'error')
         else:
             with LOCK:
                 fresh=rows(book,'Inventory')
@@ -149,9 +151,41 @@ def inventory_add():
                         try: nums.append(int(eid[len(prefix):]))
                         except ValueError: pass
                 eid=prefix+f'{max(nums,default=0)+1:04d}'
-                book.worksheet('Inventory').append_row([eid,name,category,'IN',location,datetime.now().astimezone().isoformat(timespec='seconds'),current_user() or 'public employee'],value_input_option='USER_ENTERED')
+                book.worksheet('Inventory').append_row([eid,name,category,'IN','',datetime.now().astimezone().isoformat(timespec='seconds'),current_user() or 'public employee'],value_input_option='USER_ENTERED')
             flash(f'Equipment added. ID: {eid}', 'success'); return redirect(url_for('inventory_add'))
-    return render_template('inventory.html', categories=categories, inventory=list(reversed(inventory[-20:])))
+    return render_template('inventory.html', categories=categories, inventory=list(reversed(inventory)))
+
+@app.route('/inventory/edit/<equipment_id>', methods=['GET','POST'])
+def inventory_edit(equipment_id):
+    try:
+        book, inventory, transactions, categories = get_data()
+    except Exception as e:
+        flash(f'Unable to load inventory: {e}', 'error')
+        return redirect(url_for('inventory_add'))
+    item = next((x for x in inventory if str(x.get('Equipment ID','')) == equipment_id), None)
+    if not item:
+        abort(404)
+    if request.method == 'POST':
+        name = request.form.get('name','').strip()
+        category = request.form.get('category','').strip()
+        if not name or category not in categories:
+            flash('Enter an item name and select a valid category.', 'error')
+        else:
+            ws = book.worksheet('Inventory')
+            values = ws.get_all_values()
+            headers = values[0]
+            id_col = headers.index('Equipment ID')
+            name_col = headers.index('Item Name') + 1
+            category_col = headers.index('Category') + 1
+            row_num = next((n for n, row in enumerate(values[1:], start=2) if len(row) > id_col and row[id_col] == equipment_id), None)
+            if not row_num:
+                flash('Equipment record was not found. Refresh and try again.', 'error')
+            else:
+                ws.update_cell(row_num, name_col, name)
+                ws.update_cell(row_num, category_col, category)
+                flash(f'Updated equipment {equipment_id}.', 'success')
+                return redirect(url_for('inventory_add'))
+    return render_template('inventory_edit.html', item=item, categories=categories)
 
 @app.route('/transactions')
 def transactions_view():
