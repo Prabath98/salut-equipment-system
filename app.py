@@ -294,6 +294,19 @@ def export_data(kind, file_format):
         abort(404)
     try:
         headers, data, title = _export_rows(kind)
+        # Export only the records matching the search and filters currently applied on screen.
+        query = request.args.get('q', '').strip().casefold()
+        category = request.args.get('category', '').strip().casefold()
+        if query or (kind == 'inventory' and category):
+            if kind == 'inventory':
+                data = [
+                    row for row in data
+                    if (not query or query in ' '.join(str(value) for value in row).casefold())
+                    and (not category or (len(row) > 2 and str(row[2]).casefold() == category))
+                ]
+            else:
+                data = [row for row in data if not query or query in ' '.join(str(value) for value in row).casefold()]
+            title += ' — Filtered Results'
         filename = f"salut_{kind}_{datetime.now().strftime('%Y%m%d_%H%M')}.{file_format}"
         if file_format == 'xlsx': return _excel_export(headers, data, title, filename)
         return _pdf_export(headers, data, title, filename)
