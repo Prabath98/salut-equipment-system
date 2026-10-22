@@ -26,3 +26,24 @@
 .selected-item small{font-size:11px;color:var(--muted);margin-top:2px}
 .selected-remove{flex-shrink:0;border:0;background:#f0f1f5;color:#263b7a;border-radius:7px;padding:6px 8px;font-size:11px;font-weight:750;cursor:pointer}
 @media(max-width:650px){.stack .equipment-row,.equipment-row{width:100%;flex-direction:row;align-items:center;padding:12px 10px;gap:9px}.equipment-info b{font-size:13px}.equipment-row .status{font-size:9px;padding:4px 6px}.selected-items{grid-template-columns:1fr}.equipment-list{max-height:380px}}
+
+
+/* Equipment QR labels and camera scanner */
+.new-qr-notice{display:flex;align-items:center;gap:18px;border-color:#e8cf62;background:linear-gradient(110deg,#fffdf2,#fff)}
+.new-qr-preview{flex:0 0 124px;width:124px;height:124px;padding:8px;background:#fff;border:1px solid var(--line);border-radius:10px}
+.new-qr-preview img{display:block;width:100%;height:100%;object-fit:contain}
+.new-qr-copy{min-width:0;flex:1}
+.new-qr-copy h2{margin:4px 0}
+.row-actions{display:flex;gap:10px;flex-wrap:wrap}
+.qr-scan-panel{padding:14px;border:1px solid var(--line);border-radius:12px;background:#fffdf5;margin:14px 0}
+.qr-scan-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.qr-scan-heading h3{margin:0 0 4px;font-size:15px}
+.qr-scan-heading p{margin:0}
+.qr-scan-status{font-size:13px;color:var(--muted);margin-top:10px}
+.qr-scan-status.success{color:#176b3a;font-weight:700}
+.qr-scan-status.error{color:#9b2c2c;font-weight:700}
+#qr-reader{max-width:420px;width:100%;margin:14px auto 0}
+#qr-reader video{border-radius:10px}
+[hidden]{display:none!important}
+@media(max-width:600px){.new-qr-notice{align-items:flex-start;flex-direction:column}.qr-scan-heading{align-items:flex-start;flex-direction:column;width:100%}.qr-scan-heading button{width:100%}}
+@media print{.app-header,.app-footer,.back,.page-heading,.flash-stack,.quick-links{display:none!important}}
