@@ -146,28 +146,120 @@ def movement(action):
 def inventory_add():
     try: book, inventory, transactions, categories = get_data()
     except Exception as e:
-        flash(f'Unable to connect to Google Sheets: {e}', 'error'); return render_template('inventory.html', categories=DEFAULT_CATEGORIES, inventory=[])
+        flash(f'Unable to connect to Google Sheets: {e}', 'error')
+        return render_template('inventory.html', categories=DEFAULT_CATEGORIES, inventory=[])
     if request.method == 'POST':
-        name=request.form.get('name','').strip(); category=request.form.get('category','').strip()
-        if not name or category not in categories: flash('Enter an item name and select a valid category.', 'error')
+        name = request.form.get('name', '').strip()
+        category = request.form.get('category', '').strip()
+        if not name or category not in categories:
+            flash('Enter an item name and select a valid category.', 'error')
         else:
+            # Equipment ID is the exact equipment name. Names must be unique
+            # because Equipment ID is used as the stable lookup key and QR payload.
             with LOCK:
-                fresh=rows(book,'Inventory')
-                # Human-readable unique ID; generated server-side.
-                prefix='SAL-'+datetime.now().strftime('%y%m')+'-'
-                nums=[]
-                for x in fresh:
-                    eid=str(x.get('Equipment ID',''))
-                    if eid.startswith(prefix):
-                        try: nums.append(int(eid[len(prefix):]))
-                        except ValueError: pass
-                eid=prefix+f'{max(nums,default=0)+1:04d}'
-                book.worksheet('Inventory').append_row([eid,name,category,'IN','',datetime.now().astimezone().isoformat(timespec='seconds'),current_user() or 'public employee'],value_input_option='USER_ENTERED')
-            flash(f'Equipment added. ID: {eid}', 'success'); return redirect(url_for('inventory_add', new_id=eid))
+                fresh = rows(book, 'Inventory')
+                duplicate = next((x for x in fresh if
+                    str(x.get('Item Name', '')).strip().casefold() == name.casefold()
+                    or str(x.get('Equipment ID', '')).strip().casefold() == name.casefold()), None)
+                if duplicate:
+                    flash('An item with this name or ID already exists. Use a unique equipment name.', 'error')
+                else:
+                    eid = name
+                    book.worksheet('Inventory').append_row(
+                        [eid, name, category, 'IN', '', datetime.now().astimezone().isoformat(timespec='seconds'), current_user() or 'public employee'],
+                        value_input_option='USER_ENTERED'
+                    )
+            if not duplicate:
+                flash(f'Equipment added. ID: {eid}', 'success')
+                return redirect(url_for('inventory_add', new_id=eid))
     inventory_view = list(reversed(inventory))
     new_id = request.args.get('new_id', '').strip()
     new_item = next((x for x in inventory_view if str(x.get('Equipment ID','')) == new_id), None)
     return render_template('inventory.html', categories=categories, inventory=inventory_view, new_item=new_item)
+
+
+@app.route('/inventory/sync-ids', methods=['POST'])
+def inventory_sync_ids():
+    """One-time migration: make existing Equipment IDs equal their item names."""
+    try:
+        book, inventory, transactions, categories = get_data()
+        with LOCK:
+            names = [str(item.get('Item Name', '')).strip() for item in inventory]
+            if any(not name for name in names):
+                flash('Cannot synchronize IDs: every inventory item must have a name.', 'error')
+            elif len({name.casefold() for name in names}) != len(names):
+                flash('Cannot synchronize IDs because item names are not unique. Rename duplicate items first.', 'error')
+            else:
+                mapping = {
+                    str(item.get('Equipment ID', '')).strip(): str(item.get('Item Name', '')).strip()
+                    for item in inventory
+                }
+                ids_changed = any(old_id != new_id for old_id, new_id in mapping.items())
+                if not ids_changed:
+                    flash('All Equipment IDs already match their equipment names.', 'success')
+                else:
+                    inventory_ws = book.worksheet('Inventory')
+                    inventory_ws.update(
+                        f"A2:A{len(inventory) + 1}",
+                        [[name] for name in names],
+                        value_input_option='RAW'
+                    )
+                    if transactions:
+                        tx_ids = [
+                            mapping.get(str(t.get('Equipment ID', '')).strip(), str(t.get('Equipment ID', '')).strip())
+                            for t in transactions
+                        ]
+                        if any(
+                            new_id != str(t.get('Equipment ID', '')).strip()
+                            for t, new_id in zip(transactions, tx_ids)
+                        ):
+                            book.worksheet('Transactions').update(
+                                f"D2:D{len(tx_ids) + 1}",
+                                [[equipment_id] for equipment_id in tx_ids],
+                                value_input_option='RAW'
+                            )
+                    flash(f'Updated {len(inventory)} equipment IDs to match their names. Existing transaction references were updated where a matching inventory record was found.', 'success')
+    except Exception as e:
+        app.logger.exception('Unable to synchronize Equipment IDs')
+        flash(f'Unable to synchronize Equipment IDs: {e}', 'error')
+    return redirect(url_for('inventory_add'))
+
+
+@app.route('/inventory/qr.png')
+def inventory_qr_image():
+    """Generate a scannable QR PNG containing the item's Equipment ID."""
+    equipment_id = request.args.get('equipment_id', '').strip()
+    if not equipment_id or len(equipment_id) > 200:
+        abort(404)
+    image = qrcode.make(equipment_id)
+    output = BytesIO()
+    image.save(output, format='PNG')
+    output.seek(0)
+    safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in equipment_id)[:80] or 'equipment'
+    return send_file(
+        output,
+        mimetype='image/png',
+        as_attachment=request.args.get('download') == '1',
+        download_name=f"{safe_name}_QR.png",
+        max_age=0,
+    )
+
+
+@app.route('/inventory/qr-label')
+def inventory_qr_label():
+    """Printable QR label; display fields are passed from the inventory row."""
+    equipment_id = request.args.get('equipment_id', '').strip()
+    if not equipment_id or len(equipment_id) > 200:
+        abort(404)
+    item = {
+        'Equipment ID': equipment_id,
+        'Item Name': request.args.get('name', '').strip() or equipment_id,
+        'Category': request.args.get('category', '').strip() or '—',
+        'Current Status': request.args.get('status', '').strip() or '—',
+        'Current Location': request.args.get('location', '').strip() or '',
+    }
+    return render_template('qr_label.html', item=item)
+
 
 @app.route('/inventory/qr/<equipment_id>.png')
 def inventory_qr_image(equipment_id):
@@ -209,8 +301,9 @@ def inventory_qr_label(equipment_id):
     return render_template('qr_label.html', item=item)
 
 
-@app.route('/inventory/edit/<equipment_id>', methods=['GET','POST'])
-def inventory_edit(equipment_id):
+@app.route('/inventory/edit', methods=['GET','POST'])
+def inventory_edit():
+    equipment_id = request.args.get('equipment_id', '').strip()
     try:
         book, inventory, transactions, categories = get_data()
     except Exception as e:
@@ -222,24 +315,46 @@ def inventory_edit(equipment_id):
     if request.method == 'POST':
         name = request.form.get('name','').strip()
         category = request.form.get('category','').strip()
+        duplicate = next((x for x in inventory if
+            str(x.get('Equipment ID','')) != equipment_id and
+            (str(x.get('Item Name','')).strip().casefold() == name.casefold()
+             or str(x.get('Equipment ID','')).strip().casefold() == name.casefold())), None)
         if not name or category not in categories:
             flash('Enter an item name and select a valid category.', 'error')
+        elif duplicate:
+            flash('Another item already uses this name or ID. Equipment names must be unique.', 'error')
         else:
             ws = book.worksheet('Inventory')
             values = ws.get_all_values()
             headers = values[0]
-            id_col = headers.index('Equipment ID')
+            id_col = headers.index('Equipment ID') + 1
             name_col = headers.index('Item Name') + 1
             category_col = headers.index('Category') + 1
-            row_num = next((n for n, row in enumerate(values[1:], start=2) if len(row) > id_col and row[id_col] == equipment_id), None)
+            row_num = next((n for n, row in enumerate(values[1:], start=2)
+                            if len(row) >= id_col and row[id_col - 1] == equipment_id), None)
             if not row_num:
                 flash('Equipment record was not found. Refresh and try again.', 'error')
             else:
+                new_id = name
+                if new_id != equipment_id:
+                    ws.update_cell(row_num, id_col, new_id)
                 ws.update_cell(row_num, name_col, name)
                 ws.update_cell(row_num, category_col, category)
-                flash(f'Updated equipment {equipment_id}.', 'success')
+                if new_id != equipment_id and transactions:
+                    tx_ids = [
+                        new_id if str(t.get('Equipment ID', '')).strip() == equipment_id
+                        else str(t.get('Equipment ID', '')).strip()
+                        for t in transactions
+                    ]
+                    book.worksheet('Transactions').update(
+                        f"D2:D{len(tx_ids) + 1}",
+                        [[value] for value in tx_ids],
+                        value_input_option='RAW'
+                    )
+                flash(f'Updated equipment. Equipment ID is now: {new_id}.', 'success')
                 return redirect(url_for('inventory_add'))
     return render_template('inventory_edit.html', item=item, categories=categories)
+
 
 @app.route('/transactions')
 def transactions_view():
