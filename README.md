@@ -62,3 +62,10 @@ The built-in dashboard calculates total, available (`IN`) and signed-out (`OUT`)
 - Test one transaction with more than 14 items; verify every item's status and history row.
 - Test with realistic inventory volume and inspect quota errors.
 - Add management authorization, strengthen multi-user consistency, document backup/restore and complete end-to-end tests.
+
+
+## Google Sheets read-quota protection
+- The app reuses the authorized spreadsheet/workbook and worksheet objects rather than reopening them on every page load.
+- Inventory, transaction history and categories are cached in each application worker for 20 seconds by default. Successful inventory edits, category additions and equipment movements invalidate the cache immediately.
+- Optional Render setting: `SHEETS_CACHE_TTL_SECONDS` accepts 5–60 seconds. Increase it (for example, to `30` or `45`) if many users repeatedly open pages and slightly delayed visibility of out-of-band spreadsheet edits is acceptable.
+- The first request after a fresh deployment must validate the sheet structure and load data, so it will still use several API requests. Avoid repeatedly refreshing during startup, and inspect Render logs if a 429 still occurs.
