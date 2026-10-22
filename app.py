@@ -193,15 +193,19 @@ def inventory_qr_image(equipment_id):
 
 @app.route('/inventory/qr/<equipment_id>')
 def inventory_qr_label(equipment_id):
-    """Printable QR label for an existing equipment record."""
-    try:
-        _, inventory, _, _ = get_data()
-    except Exception:
-        app.logger.exception('Unable to load equipment QR label')
-        abort(503, description='Equipment data is temporarily unavailable.')
-    item = next((x for x in inventory if str(x.get('Equipment ID','')) == equipment_id), None)
-    if not item:
+    """Printable QR label built from inventory-page data, avoiding another Sheets read."""
+    if not equipment_id or len(equipment_id) > 100:
         abort(404)
+    # The label is opened from an inventory row, which passes the item's current
+    # display fields as query parameters. Avoid rereading all Sheets tabs just
+    # to render a label; this helps prevent quota errors and keeps QR images usable.
+    item = {
+        'Equipment ID': equipment_id,
+        'Item Name': request.args.get('name', '').strip() or f'Equipment {equipment_id}',
+        'Category': request.args.get('category', '').strip() or '—',
+        'Current Status': request.args.get('status', '').strip() or '—',
+        'Current Location': request.args.get('location', '').strip() or '',
+    }
     return render_template('qr_label.html', item=item)
 
 
