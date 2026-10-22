@@ -1,4 +1,4 @@
-import os, json, secrets, threading
+import os, json, secrets, threading, time, copy
 from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, abort, send_file
@@ -19,6 +19,18 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY') or secrets.token_hex(32)
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','true').lower() == 'true', PERMANENT_SESSION_LIFETIME=3600)
 LOCK = threading.RLock()
+# Reuse the authorized Sheets workbook and short-cache reads to avoid repeated
+# requests across ordinary page loads. Writes invalidate the cache immediately.
+_BOOK_CACHE_LOCK = threading.RLock()
+_DATA_CACHE_LOCK = threading.RLock()
+_BOOK_CACHE = None
+_SCHEMA_READY = False
+_DATA_CACHE = None
+_DATA_CACHE_AT = 0.0
+try:
+    DATA_CACHE_TTL_SECONDS = max(5.0, min(60.0, float(os.environ.get('SHEETS_CACHE_TTL_SECONDS', '20'))))
+except ValueError:
+    DATA_CACHE_TTL_SECONDS = 20.0
 DEFAULT_CATEGORIES = ['Air Scrubbers', 'Dehumidifiers', 'Fans']
 LOCATIONS = ['1818', 'Cottontail']
 HEADERS = {
@@ -37,41 +49,77 @@ def credentials_dict():
     raise RuntimeError('Google Sheets is not configured. Add GOOGLE_SERVICE_ACCOUNT_JSON to environment variables.')
 
 def get_book():
-    info = credentials_dict()
-    creds = Credentials.from_service_account_info(info, scopes=['https://www.googleapis.com/auth/spreadsheets'])
-    client = gspread.authorize(creds)
-    sheet_id = os.environ.get('GOOGLE_SHEET_ID','').strip()
-    if not sheet_id: raise RuntimeError('GOOGLE_SHEET_ID is missing.')
-    return client.open_by_key(sheet_id)
+    global _BOOK_CACHE
+    with _BOOK_CACHE_LOCK:
+        if _BOOK_CACHE is not None:
+            return _BOOK_CACHE
+        info = credentials_dict()
+        creds = Credentials.from_service_account_info(info, scopes=['https://www.googleapis.com/auth/spreadsheets'])
+        client = gspread.authorize(creds)
+        sheet_id = os.environ.get('GOOGLE_SHEET_ID', '').strip()
+        if not sheet_id:
+            raise RuntimeError('GOOGLE_SHEET_ID is missing.')
+        _BOOK_CACHE = client.open_by_key(sheet_id)
+        return _BOOK_CACHE
 
 def ensure_sheets(book):
-    for title, headers in HEADERS.items():
-        try: ws = book.worksheet(title)
-        except gspread.WorksheetNotFound:
-            ws = book.add_worksheet(title=title, rows=1000, cols=max(15,len(headers)))
-        if not ws.get_all_values(): ws.append_row(headers)
-        elif ws.row_values(1) != headers:
-            # Do not overwrite an existing schema or user data silently.
-            raise RuntimeError(f'The {title} sheet has unexpected headers. Expected: {", ".join(headers)}')
-    cats = book.worksheet('Categories')
-    if len(cats.get_all_values()) == 1:
-        for category in DEFAULT_CATEGORIES: cats.append_row([category])
+    global _SCHEMA_READY
+    with _BOOK_CACHE_LOCK:
+        if _SCHEMA_READY:
+            return
+        for title, headers in HEADERS.items():
+            try:
+                ws = book.worksheet(title)
+            except gspread.WorksheetNotFound:
+                ws = book.add_worksheet(title=title, rows=1000, cols=max(15, len(headers)))
+                ws.append_row(headers)
+                values = [headers]
+            else:
+                values = ws.get_all_values()
+                if not values:
+                    ws.append_row(headers)
+                    values = [headers]
+                elif values[0] != headers:
+                    raise RuntimeError(f'The {title} sheet has unexpected headers. Expected: {", ".join(headers)}')
+            if title == 'Categories' and len(values) == 1:
+                for category in DEFAULT_CATEGORIES:
+                    ws.append_row([category])
+        _SCHEMA_READY = True
 
 def book_ready():
-    book = get_book(); ensure_sheets(book); return book
+    book = get_book()
+    ensure_sheets(book)
+    return book
 
 def rows(book, name):
-    data = book.worksheet(name).get_all_records()
-    return data
+    return book.worksheet(name).get_all_records()
+
+def invalidate_data_cache():
+    global _DATA_CACHE, _DATA_CACHE_AT
+    with _DATA_CACHE_LOCK:
+        _DATA_CACHE = None
+        _DATA_CACHE_AT = 0.0
 
 def current_user(): return 'public user'
 
 def get_data():
+    global _DATA_CACHE, _DATA_CACHE_AT
     book = book_ready()
-    inventory = rows(book, 'Inventory')
-    transactions = rows(book, 'Transactions')
-    categories = [str(r.get('Category','')).strip() for r in rows(book,'Categories') if str(r.get('Category','')).strip()]
-    return book, inventory, transactions, categories
+    with _DATA_CACHE_LOCK:
+        now = time.monotonic()
+        if _DATA_CACHE is not None and now - _DATA_CACHE_AT < DATA_CACHE_TTL_SECONDS:
+            inventory, transactions, categories = _DATA_CACHE
+            return book, copy.deepcopy(inventory), copy.deepcopy(transactions), list(categories)
+        inventory = rows(book, 'Inventory')
+        transactions = rows(book, 'Transactions')
+        categories = [
+            str(r.get('Category', '')).strip()
+            for r in rows(book, 'Categories')
+            if str(r.get('Category', '')).strip()
+        ]
+        _DATA_CACHE = (inventory, transactions, categories)
+        _DATA_CACHE_AT = time.monotonic()
+        return book, copy.deepcopy(inventory), copy.deepcopy(transactions), list(categories)
 
 def status_is(item, wanted): return str(item.get('Current Status','')).strip().upper() == wanted
 
@@ -122,23 +170,43 @@ def movement(action):
             completed=[]; conflicts=[]
             # One Gunicorn worker plus an in-process lock reduces race conditions. For strict multi-user atomicity, use a database.
             with LOCK:
-                fresh = rows(book,'Inventory')
-                ws=book.worksheet('Inventory')
-                all_values=ws.get_all_values(); header=all_values[0] if all_values else []
-                status_col=header.index('Current Status')+1; id_col=header.index('Equipment ID')+1; location_col=header.index('Current Location')+1
+                ws = book.worksheet('Inventory')
+                all_values = ws.get_all_values()
+                header = all_values[0] if all_values else []
+                if not header:
+                    raise RuntimeError('The Inventory worksheet has no header row.')
+                status_index = header.index('Current Status')
+                id_index = header.index('Equipment ID')
+                location_col = header.index('Current Location') + 1
+                fresh_by_id = {}
+                for row_num, values in enumerate(all_values[1:], start=2):
+                    record = {key: values[idx] if idx < len(values) else '' for idx, key in enumerate(header)}
+                    equipment_id = str(record.get('Equipment ID', '')).strip()
+                    if equipment_id:
+                        fresh_by_id[equipment_id] = (row_num, record)
+                status_col = status_index + 1
+                id_col = id_index + 1
                 for eid in ids:
-                    item=next((i for i in fresh if str(i.get('Equipment ID','')) == eid),None)
-                    if not item or not status_is(item,wanted): conflicts.append(eid); continue
-                    row_num=next((n for n,r in enumerate(all_values[1:],start=2) if len(r)>=id_col and r[id_col-1] == eid),None)
-                    if not row_num: conflicts.append(eid); continue
+                    row_info = fresh_by_id.get(eid)
+                    if not row_info:
+                        conflicts.append(eid)
+                        continue
+                    row_num, item = row_info
+                    if not status_is(item, wanted):
+                        conflicts.append(eid)
+                        continue
                     new_status='OUT' if action=='out' else 'IN'
                     ws.update_cell(row_num,status_col,new_status)
                     # Assign the current location only when equipment is signed out; clear it when returned.
                     ws.update_cell(row_num,location_col,fields.get('location','').strip() if action=='out' else '')
                     append_transaction(book,item,'SIGN OUT' if action=='out' else 'SIGN IN',fields)
                     completed.append(eid)
-            if completed: flash(f'{len(completed)} item(s) successfully signed {"out" if action=="out" else "in"}.', 'success')
-            if conflicts: flash('Some items were not processed because their status changed. Refresh and try again: '+', '.join(conflicts), 'error')
+            if completed:
+                invalidate_data_cache()
+                flash(f'{len(completed)} item(s) successfully signed {"out" if action=="out" else "in"}.', 'success')
+            if conflicts:
+                invalidate_data_cache()
+                flash('Some items were not processed because their status changed. Refresh and try again: '+', '.join(conflicts), 'error')
             return redirect(url_for('movement',action=action))
     return render_template('movement.html', action=action, items=available, categories=categories)
 
@@ -169,6 +237,7 @@ def inventory_add():
                         [eid, name, category, 'IN', '', datetime.now().astimezone().isoformat(timespec='seconds'), current_user() or 'public employee'],
                         value_input_option='USER_ENTERED'
                     )
+                    invalidate_data_cache()
             if not duplicate:
                 flash(f'Equipment added. ID: {eid}', 'success')
                 return redirect(url_for('inventory_add', new_id=eid))
@@ -264,6 +333,7 @@ def inventory_edit():
                         [[value] for value in tx_ids],
                         value_input_option='RAW'
                     )
+                invalidate_data_cache()
                 flash(f'Updated equipment. Equipment ID is now: {new_id}.', 'success')
                 return redirect(url_for('inventory_add'))
     return render_template('inventory_edit.html', item=item, categories=categories)
@@ -285,7 +355,7 @@ def categories_view():
         elif name.casefold() in [c.casefold() for c in categories]: flash('That category already exists.', 'error')
         elif len(name)>60: flash('Category names must be 60 characters or fewer.', 'error')
         elif book:
-            book.worksheet('Categories').append_row([name]); flash('Category added.', 'success'); return redirect(url_for('categories_view'))
+            book.worksheet('Categories').append_row([name]); invalidate_data_cache(); flash('Category added.', 'success'); return redirect(url_for('categories_view'))
     return render_template('categories.html', categories=categories)
 
 
