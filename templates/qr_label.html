@@ -1,0 +1,31 @@
+{% extends 'base.html' %}
+{% block title %}QR Label · {{ item['Equipment ID'] }} · SaLUT{% endblock %}
+{% block content %}
+<a class="back" href="{{ url_for('inventory_add') }}">← Back to inventory</a>
+<section class="panel qr-label-sheet">
+  <div class="eyebrow">SALUT EQUIPMENT LABEL</div>
+  <h1>{{ item['Item Name'] }}</h1>
+  <div class="qr-label-body">
+    <img class="qr-label-image" src="{{ url_for('inventory_qr_image', equipment_id=item['Equipment ID']) }}" alt="QR code for equipment {{ item['Equipment ID'] }}">
+    <div class="qr-label-details">
+      <p class="qr-label-id">{{ item['Equipment ID'] }}</p>
+      <p><strong>Category:</strong> {{ item['Category'] }}</p>
+      <p><strong>Status:</strong> {{ item['Current Status'] }}</p>
+      <p class="muted small">Scan this code on the Sign In or Sign Out screen to select the equipment.</p>
+    </div>
+  </div>
+  <div class="quick-links qr-print-actions">
+    <button type="button" class="btn primary" onclick="window.print()">Print label</button>
+    <a class="btn secondary" href="{{ url_for('inventory_qr_image', equipment_id=item['Equipment ID']) }}?download=1">Download QR PNG</a>
+    <a class="btn secondary" href="{{ url_for('inventory_add') }}">Back to inventory</a>
+  </div>
+</section>
+<style>
+.qr-label-sheet{max-width:620px;margin:24px auto;padding:28px}
+.qr-label-body{display:flex;align-items:center;gap:24px;margin:22px 0}
+.qr-label-image{width:210px;height:210px;object-fit:contain;border:1px solid #e8e4dc;border-radius:8px;padding:8px;background:white}
+.qr-label-id{font-size:28px;font-weight:800;letter-spacing:1px;margin:4px 0 12px}
+@media(max-width:520px){.qr-label-body{flex-direction:column;align-items:flex-start}.qr-label-image{width:180px;height:180px}}
+@media print{body{background:white}.qr-label-sheet{box-shadow:none;border:1px solid #ccc;margin:0 auto;max-width:100%;page-break-inside:avoid}.qr-print-actions{display:none!important}}
+</style>
+{% endblock %}
