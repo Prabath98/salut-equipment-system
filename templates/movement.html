@@ -1,1 +1,75 @@
-{% extends 'base.html' %}{% block title %}Signing {{ action|upper }} · SaLUT{% endblock %}{% block content %}<a class="back" href="{{ url_for('home') }}">← Back to home</a><section class="page-heading"><div class="eyebrow">EQUIPMENT MOVEMENT</div><h1>Signing {{ action|upper }}</h1><p class="muted">{% if action=='out' %}Select equipment currently marked IN to record it leaving the inventory.{% else %}Select equipment currently marked OUT to record it returning.{% endif %}</p></section><form method="post" class="panel stack" data-clearable><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><div class="form-grid"><label>Person's name *<input name="person" required placeholder="Full name"></label><label>Location *<select name="location" required><option value="">Select location</option>{% for loc in locations %}<option>{{ loc }}</option>{% endfor %}</select></label>{% if action=='out' %}<label>Project number / name<input name="project" placeholder="Project number or name"></label><label>Requester / Project Manager<input name="requester" placeholder="Name"></label><label>Project location<input name="project_location" placeholder="Address or site"></label><label>Unit / apartment number<input name="unit" placeholder="If applicable"></label>{% endif %}</div><div class="section-divider"></div><div class="equipment-head"><div><h2>Select equipment *</h2><p class="muted small">Only equipment currently {{ 'IN' if action=='out' else 'OUT' }} is shown.</p></div><span class="count-pill"><span id="selected-count">0</span> selected</span></div><div class="filter-grid"><label class="search-label">Search equipment<input id="equipment-search" type="search" placeholder="Search item name or ID"></label><label>Category filter<select id="category-filter"><option value="">All categories</option>{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select></label></div><div class="equipment-list" id="equipment-list">{% for item in items %}<label class="equipment-row" data-name="{{ item['Item Name']|lower }}" data-id="{{ item['Equipment ID']|lower }}" data-category="{{ item['Category'] }}"><input type="checkbox" name="equipment_ids" value="{{ item['Equipment ID'] }}"><span class="equipment-info"><b>{{ item['Item Name'] }}</b><small>{{ item['Equipment ID'] }} · {{ item['Category'] }}</small></span><span class="status {{ 'in' if item['Current Status']|upper=='IN' else 'out' }}">{{ 'Available · IN' if action=='out' else 'Returning · OUT' }}</span></label>{% else %}<div class="empty-state">No eligible equipment is available for this action.</div>{% endfor %}</div><section class="selected-summary" aria-live="polite"><div class="selected-summary-head"><h3>Selected equipment</h3><span id="selected-summary-count">0 items</span></div><div id="selected-items" class="selected-items"><p class="muted small">No equipment selected yet.</p></div></section><label>Notes<textarea name="notes" rows="3" placeholder="Optional notes"></textarea></label><div class="form-actions"><button type="button" class="btn secondary" data-clear-form>Clear</button><button class="btn primary" type="submit">Confirm Sign {{ action|upper }}</button></div></form>{% endblock %}
+{% extends 'base.html' %}{% block title %}Signing {{ action|upper }} · SaLUT{% endblock %}{% block content %}<a class="back" href="{{ url_for('home') }}">← Back to home</a><section class="page-heading"><div class="eyebrow">EQUIPMENT MOVEMENT</div><h1>Signing {{ action|upper }}</h1><p class="muted">{% if action=='out' %}Select equipment currently marked IN to record it leaving the inventory.{% else %}Select equipment currently marked OUT to record it returning.{% endif %}</p></section><form method="post" class="panel stack" data-clearable><input type="hidden" name="_csrf_token" value="{{ csrf_token }}"><div class="form-grid"><label>Person's name *<input name="person" required placeholder="Full name"></label><label>Location *<select name="location" required><option value="">Select location</option>{% for loc in locations %}<option>{{ loc }}</option>{% endfor %}</select></label>{% if action=='out' %}<label>Project number / name<input name="project" placeholder="Project number or name"></label><label>Requester / Project Manager<input name="requester" placeholder="Name"></label><label>Project location<input name="project_location" placeholder="Address or site"></label><label>Unit / apartment number<input name="unit" placeholder="If applicable"></label>{% endif %}</div><div class="section-divider"></div><div class="equipment-head"><div><h2>Select equipment *</h2><p class="muted small">Only equipment currently {{ 'IN' if action=='out' else 'OUT' }} is shown.</p></div><span class="count-pill"><span id="selected-count">0</span> selected</span></div><section class="qr-scan-panel"><div class="qr-scan-heading"><div><h3>Scan equipment QR code</h3><p class="muted small">Scan a SaLUT equipment label to select it in this transaction.</p></div><button class="btn secondary" id="start-qr-scan" type="button">Start camera scanner</button><button class="btn secondary" id="stop-qr-scan" type="button" hidden>Stop scanner</button></div><div id="qr-scan-status" class="qr-scan-status" role="status" aria-live="polite">Camera scanner is stopped.</div><div id="qr-reader" hidden></div></section><div class="filter-grid"><label class="search-label">Search equipment<input id="equipment-search" type="search" placeholder="Search item name or ID"></label><label>Category filter<select id="category-filter"><option value="">All categories</option>{% for c in categories %}<option>{{ c }}</option>{% endfor %}</select></label></div><div class="equipment-list" id="equipment-list">{% for item in items %}<label class="equipment-row" data-name="{{ item['Item Name']|lower }}" data-id="{{ item['Equipment ID']|lower }}" data-category="{{ item['Category'] }}"><input type="checkbox" name="equipment_ids" value="{{ item['Equipment ID'] }}"><span class="equipment-info"><b>{{ item['Item Name'] }}</b><small>{{ item['Equipment ID'] }} · {{ item['Category'] }}</small></span><span class="status {{ 'in' if item['Current Status']|upper=='IN' else 'out' }}">{{ 'Available · IN' if action=='out' else 'Returning · OUT' }}</span></label>{% else %}<div class="empty-state">No eligible equipment is available for this action.</div>{% endfor %}</div><section class="selected-summary" aria-live="polite"><div class="selected-summary-head"><h3>Selected equipment</h3><span id="selected-summary-count">0 items</span></div><div id="selected-items" class="selected-items"><p class="muted small">No equipment selected yet.</p></div></section><label>Notes<textarea name="notes" rows="3" placeholder="Optional notes"></textarea></label><div class="form-actions"><button type="button" class="btn secondary" data-clear-form>Clear</button><button class="btn primary" type="submit">Confirm Sign {{ action|upper }}</button></div></form><script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script><script>
+(() => {
+  const startButton = document.getElementById('start-qr-scan');
+  const stopButton = document.getElementById('stop-qr-scan');
+  const reader = document.getElementById('qr-reader');
+  const status = document.getElementById('qr-scan-status');
+  if (!startButton || !reader || !status) return;
+  let scanner = null;
+  let running = false;
+  let lastCode = '';
+  let lastAt = 0;
+  function setStatus(message, kind) {
+    status.textContent = message;
+    status.className = 'qr-scan-status' + (kind ? ' ' + kind : '');
+  }
+  function selectEquipment(decodedText) {
+    const equipmentId = String(decodedText || '').trim().replace(/^SALUT-EQUIPMENT:/i, '');
+    const search = document.getElementById('equipment-search');
+    const category = document.getElementById('category-filter');
+    if (search && search.value) { search.value = ''; search.dispatchEvent(new Event('input', {bubbles:true})); }
+    if (category && category.value) { category.selectedIndex = 0; category.dispatchEvent(new Event('change', {bubbles:true})); }
+    const inputs = [...document.querySelectorAll('#equipment-list input[name="equipment_ids"]')];
+    const input = inputs.find(el => el.value === equipmentId);
+    if (!input) {
+      setStatus(equipmentId + ' is not available for this action. Check whether its status is eligible.', 'error');
+      return;
+    }
+    const row = input.closest('.equipment-row');
+    if (!input.checked) {
+      input.checked = true;
+      input.dispatchEvent(new Event('change', {bubbles:true}));
+    }
+    row?.scrollIntoView({behavior:'smooth', block:'center'});
+    setStatus('Selected ' + equipmentId + '.', 'success');
+  }
+  startButton.addEventListener('click', async () => {
+    if (running) return;
+    if (!window.Html5Qrcode) {
+      setStatus('The QR scanning library could not load. Check the internet connection and reload this page.', 'error');
+      return;
+    }
+    reader.hidden = false;
+    startButton.hidden = true;
+    stopButton.hidden = false;
+    scanner = new Html5Qrcode('qr-reader');
+    try {
+      await scanner.start({facingMode:'environment'}, {fps:10, qrbox:{width:230,height:230}}, text => {
+        const now = Date.now();
+        if (text === lastCode && now - lastAt < 1800) return;
+        lastCode = text; lastAt = now;
+        selectEquipment(text);
+      }, () => {});
+      running = true;
+      setStatus('Camera is active. Point it at an equipment QR label.', '');
+    } catch (err) {
+      reader.hidden = true;
+      startButton.hidden = false;
+      stopButton.hidden = true;
+      scanner = null;
+      setStatus('Could not start the camera. Allow camera access and open this site over HTTPS.', 'error');
+    }
+  });
+  stopButton.addEventListener('click', async () => {
+    if (scanner && running) {
+      try { await scanner.stop(); await scanner.clear(); } catch (err) {}
+    }
+    scanner = null; running = false; reader.hidden = true;
+    startButton.hidden = false; stopButton.hidden = true;
+    setStatus('Camera scanner is stopped.', '');
+  });
+  window.addEventListener('beforeunload', () => {
+    if (scanner && running) scanner.stop().catch(() => {});
+  });
+})();
+</script>{% endblock %}
