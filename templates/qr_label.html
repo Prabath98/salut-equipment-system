@@ -16,7 +16,7 @@
   </div>
   <div class="quick-links qr-print-actions">
     <button type="button" class="btn primary" onclick="window.print()">Print label</button>
-    <a class="btn secondary" href="{{ url_for('inventory_qr_image', equipment_id=item['Equipment ID']) }}?download=1">Download QR PNG</a>
+    <a class="btn secondary" href="{{ url_for('inventory_qr_image', equipment_id=item['Equipment ID'], download=1) }}">Download QR PNG</a>
     <a class="btn secondary" href="{{ url_for('inventory_add') }}">Back to inventory</a>
   </div>
 </section>
