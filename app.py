@@ -171,14 +171,12 @@ def inventory_add():
 
 @app.route('/inventory/qr/<equipment_id>.png')
 def inventory_qr_image(equipment_id):
-    """Generate a scannable QR PNG for an equipment ID; no image file is stored."""
-    try:
-        _, inventory, _, _ = get_data()
-    except Exception:
-        app.logger.exception('Unable to load equipment for QR generation')
-        abort(503, description='Equipment data is temporarily unavailable.')
-    item = next((x for x in inventory if str(x.get('Equipment ID','')) == equipment_id), None)
-    if not item:
+    """Generate a scannable QR PNG for an equipment ID; no image file is stored.
+
+    The label page is linked from actual inventory records. Avoid an additional
+    Google Sheets read for the image request to conserve API quota.
+    """
+    if not equipment_id or len(equipment_id) > 100:
         abort(404)
     image = qrcode.make(equipment_id)
     output = BytesIO()
