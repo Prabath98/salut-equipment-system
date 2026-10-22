@@ -24,6 +24,7 @@ LOCK = threading.RLock()
 _BOOK_CACHE_LOCK = threading.RLock()
 _DATA_CACHE_LOCK = threading.RLock()
 _BOOK_CACHE = None
+_WORKSHEET_CACHE = {}
 _SCHEMA_READY = False
 _DATA_CACHE = None
 _DATA_CACHE_AT = 0.0
@@ -62,6 +63,17 @@ def get_book():
         _BOOK_CACHE = client.open_by_key(sheet_id)
         return _BOOK_CACHE
 
+def get_worksheet(book, name):
+    # gspread's book.worksheet(name) may refetch spreadsheet metadata; reuse
+    # Worksheet objects for the life of this single-worker application.
+    with _BOOK_CACHE_LOCK:
+        ws = _WORKSHEET_CACHE.get(name)
+        if ws is not None:
+            return ws
+        ws = book.worksheet(name)
+        _WORKSHEET_CACHE[name] = ws
+        return ws
+
 def ensure_sheets(book):
     global _SCHEMA_READY
     with _BOOK_CACHE_LOCK:
@@ -69,9 +81,10 @@ def ensure_sheets(book):
             return
         for title, headers in HEADERS.items():
             try:
-                ws = book.worksheet(title)
+                ws = get_worksheet(book, title)
             except gspread.WorksheetNotFound:
                 ws = book.add_worksheet(title=title, rows=1000, cols=max(15, len(headers)))
+                _WORKSHEET_CACHE[title] = ws
                 ws.append_row(headers)
                 values = [headers]
             else:
@@ -92,7 +105,7 @@ def book_ready():
     return book
 
 def rows(book, name):
-    return book.worksheet(name).get_all_records()
+    return get_worksheet(book, name).get_all_records()
 
 def invalidate_data_cache():
     global _DATA_CACHE, _DATA_CACHE_AT
@@ -124,7 +137,7 @@ def get_data():
 def status_is(item, wanted): return str(item.get('Current Status','')).strip().upper() == wanted
 
 def append_transaction(book, item, action, fields):
-    ws = book.worksheet('Transactions')
+    ws = get_worksheet(book, 'Transactions')
     now = datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds')
     row = [secrets.token_hex(5).upper(), now, action, item.get('Equipment ID',''), item.get('Item Name',''), item.get('Category',''), fields.get('person','').strip(), fields.get('location','').strip(), fields.get('project','').strip(), fields.get('requester','').strip(), fields.get('project_location','').strip(), fields.get('unit','').strip(), fields.get('notes','').strip(), current_user() or 'public employee']
     ws.append_row(row, value_input_option='USER_ENTERED')
@@ -170,7 +183,7 @@ def movement(action):
             completed=[]; conflicts=[]
             # One Gunicorn worker plus an in-process lock reduces race conditions. For strict multi-user atomicity, use a database.
             with LOCK:
-                ws = book.worksheet('Inventory')
+                ws = get_worksheet(book, 'Inventory')
                 all_values = ws.get_all_values()
                 header = all_values[0] if all_values else []
                 if not header:
@@ -355,7 +368,7 @@ def categories_view():
         elif name.casefold() in [c.casefold() for c in categories]: flash('That category already exists.', 'error')
         elif len(name)>60: flash('Category names must be 60 characters or fewer.', 'error')
         elif book:
-            book.worksheet('Categories').append_row([name]); invalidate_data_cache(); flash('Category added.', 'success'); return redirect(url_for('categories_view'))
+            get_worksheet(book, 'Categories').append_row([name]); invalidate_data_cache(); flash('Category added.', 'success'); return redirect(url_for('categories_view'))
     return render_template('categories.html', categories=categories)
 
 
