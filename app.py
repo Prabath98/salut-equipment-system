@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, session, flash, abort, send_file
 import gspread
+import qrcode
 from io import BytesIO
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4, landscape
@@ -162,8 +163,49 @@ def inventory_add():
                         except ValueError: pass
                 eid=prefix+f'{max(nums,default=0)+1:04d}'
                 book.worksheet('Inventory').append_row([eid,name,category,'IN','',datetime.now().astimezone().isoformat(timespec='seconds'),current_user() or 'public employee'],value_input_option='USER_ENTERED')
-            flash(f'Equipment added. ID: {eid}', 'success'); return redirect(url_for('inventory_add'))
-    return render_template('inventory.html', categories=categories, inventory=list(reversed(inventory)))
+            flash(f'Equipment added. ID: {eid}', 'success'); return redirect(url_for('inventory_add', new_id=eid))
+    inventory_view = list(reversed(inventory))
+    new_id = request.args.get('new_id', '').strip()
+    new_item = next((x for x in inventory_view if str(x.get('Equipment ID','')) == new_id), None)
+    return render_template('inventory.html', categories=categories, inventory=inventory_view, new_item=new_item)
+
+@app.route('/inventory/qr/<equipment_id>.png')
+def inventory_qr_image(equipment_id):
+    """Generate a scannable QR PNG for an equipment ID; no image file is stored."""
+    try:
+        _, inventory, _, _ = get_data()
+    except Exception:
+        app.logger.exception('Unable to load equipment for QR generation')
+        abort(503, description='Equipment data is temporarily unavailable.')
+    item = next((x for x in inventory if str(x.get('Equipment ID','')) == equipment_id), None)
+    if not item:
+        abort(404)
+    image = qrcode.make(equipment_id)
+    output = BytesIO()
+    image.save(output, format='PNG')
+    output.seek(0)
+    return send_file(
+        output,
+        mimetype='image/png',
+        as_attachment=request.args.get('download') == '1',
+        download_name=f"{equipment_id}_QR.png",
+        max_age=0,
+    )
+
+
+@app.route('/inventory/qr/<equipment_id>')
+def inventory_qr_label(equipment_id):
+    """Printable QR label for an existing equipment record."""
+    try:
+        _, inventory, _, _ = get_data()
+    except Exception:
+        app.logger.exception('Unable to load equipment QR label')
+        abort(503, description='Equipment data is temporarily unavailable.')
+    item = next((x for x in inventory if str(x.get('Equipment ID','')) == equipment_id), None)
+    if not item:
+        abort(404)
+    return render_template('qr_label.html', item=item)
+
 
 @app.route('/inventory/edit/<equipment_id>', methods=['GET','POST'])
 def inventory_edit(equipment_id):
