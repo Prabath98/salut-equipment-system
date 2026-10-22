@@ -11,7 +11,7 @@ This Flask application uses Google Sheets as its shared data store and is config
 ## Features
 - Mobile-responsive employee landing page, movement forms, search and category filters.
 - Google Sheets-backed `Inventory`, `Transactions`, and `Categories` tabs.
-- Unique equipment IDs, IN/OUT eligibility filtering, and re-check of current status on save.
+- Equipment IDs exactly match unique equipment names, IN/OUT eligibility filtering, and re-check of current status on save.
 - Manager-only dashboard, transaction history and category management.
 - CSRF form-token checks and secure/HTTP-only session cookies.
 
@@ -71,3 +71,10 @@ Do not add `USERS_JSON`; employee accounts are not used in this access model. Sa
 - Sign In and Sign Out pages include a camera scanner. Scan-to-select only succeeds when the scanned item is currently eligible for that action (OUT for Sign In, IN for Sign Out).
 - QR generation uses the Python `qrcode[pil]` package. Camera scanning uses `html5-qrcode` from a CDN, so the browser needs internet access, camera permission, and HTTPS (Render provides HTTPS).
 - The QR code encodes the Equipment ID only. It does not contain employee, project, or location data.
+
+
+## Equipment ID rule
+- The Equipment ID is the exact equipment name (for example, `Air Scrubber 01` has ID `Air Scrubber 01`). Equipment names must be unique.
+- New equipment is created with `Equipment ID = Item Name`. Editing the item name updates the Equipment ID and matching transaction ID references.
+- On the Manage Inventory page, use **Synchronize existing Equipment IDs to names** to convert existing records from older ID formats. This updates Inventory IDs and matching `Transactions` Equipment ID references. Historical transaction Item Name values are preserved.
+- Print or download new QR labels after synchronizing IDs, because QR codes encode the Equipment ID.
