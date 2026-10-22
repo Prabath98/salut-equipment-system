@@ -261,39 +261,35 @@ def inventory_qr_label():
     return render_template('qr_label.html', item=item)
 
 
-@app.route('/inventory/qr/<equipment_id>.png')
-def inventory_qr_image(equipment_id):
-    """Generate a scannable QR PNG for an equipment ID; no image file is stored.
-
-    The label page is linked from actual inventory records. Avoid an additional
-    Google Sheets read for the image request to conserve API quota.
-    """
-    if not equipment_id or len(equipment_id) > 100:
+@app.route('/inventory/qr.png')
+def inventory_qr_image():
+    """Generate a scannable QR PNG containing the item's Equipment ID."""
+    equipment_id = request.args.get('equipment_id', '').strip()
+    if not equipment_id or len(equipment_id) > 200:
         abort(404)
     image = qrcode.make(equipment_id)
     output = BytesIO()
     image.save(output, format='PNG')
     output.seek(0)
+    safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in equipment_id)[:80] or 'equipment'
     return send_file(
         output,
         mimetype='image/png',
         as_attachment=request.args.get('download') == '1',
-        download_name=f"{equipment_id}_QR.png",
+        download_name=f"{safe_name}_QR.png",
         max_age=0,
     )
 
 
-@app.route('/inventory/qr/<equipment_id>')
-def inventory_qr_label(equipment_id):
-    """Printable QR label built from inventory-page data, avoiding another Sheets read."""
-    if not equipment_id or len(equipment_id) > 100:
+@app.route('/inventory/qr-label')
+def inventory_qr_label():
+    """Printable QR label; display fields are passed from the inventory row."""
+    equipment_id = request.args.get('equipment_id', '').strip()
+    if not equipment_id or len(equipment_id) > 200:
         abort(404)
-    # The label is opened from an inventory row, which passes the item's current
-    # display fields as query parameters. Avoid rereading all Sheets tabs just
-    # to render a label; this helps prevent quota errors and keeps QR images usable.
     item = {
         'Equipment ID': equipment_id,
-        'Item Name': request.args.get('name', '').strip() or f'Equipment {equipment_id}',
+        'Item Name': request.args.get('name', '').strip() or equipment_id,
         'Category': request.args.get('category', '').strip() or '—',
         'Current Status': request.args.get('status', '').strip() or '—',
         'Current Location': request.args.get('location', '').strip() or '',
