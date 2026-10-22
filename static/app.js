@@ -115,3 +115,6 @@ document.getElementById('inventory-search')?.addEventListener('input', updateFil
 document.getElementById('inventory-category-filter')?.addEventListener('change', updateFilteredExportLinks);
 document.getElementById('history-search')?.addEventListener('input', updateFilteredExportLinks);
 updateFilteredExportLinks();
+
+
+// QR scanning is implemented on the movement page; this bundle handles selection counts and filters.
