@@ -1,80 +1,64 @@
-# SaLUT Equipment Management — free-hosting build
+# SaLUT Equipment Management — pilot build
 
-This Flask application uses Google Sheets as its shared data store and is configured for a small internal pilot.
+Live prototype: https://salut-equipment-system.onrender.com
 
-## Access design
-- Employees do **not** log in. The home page `/` provides Signing OUT, Signing IN and Adding Inventory.
-- Managers use the separate URL `/manager`, enter the manager password, and then access the dashboard at `/manager/dashboard`.
-- The manager area is password-protected; a separate URL alone is not security. Keep the manager password strong and private.
-- Because employee actions are open without login, anyone who knows the employee URL can submit equipment movements or add inventory. Share it only with intended staff and understand that the app cannot verify an employee's identity. The person name is recorded from the form.
+This Flask application uses Google Sheets as its shared data store. It is intended as a pilot/demo for SaLUT's equipment sign-in/sign-out workflow, not a security-certified production system.
 
-## Features
-- Mobile-responsive employee landing page, movement forms, search and category filters.
-- Google Sheets-backed `Inventory`, `Transactions`, and `Categories` tabs.
-- Equipment IDs exactly match unique equipment names, IN/OUT eligibility filtering, and re-check of current status on save.
-- Manager-only dashboard, transaction history and category management.
-- CSRF form-token checks and secure/HTTP-only session cookies.
+## Approach and technology
+- **Web application:** Python, Flask and Jinja templates implement the routes, validation and status-transition rules.
+- **User interface:** HTML, CSS and JavaScript provide responsive pages, search/category filters, multi-item selection and QR camera scanning.
+- **Shared data:** Google Sheets, accessed through the Sheets API using `gspread` and a service account. The workbook has `Inventory`, `Transactions` and `Categories` tabs.
+- **Hosting:** Render runs the Flask app through Gunicorn.
+- **Reporting:** `openpyxl` generates Excel files and ReportLab generates PDF files. Export routes accept the current search/category parameters.
+- **QR codes:** Python `qrcode[pil]` generates QR PNGs on demand. The browser scanner uses `html5-qrcode` from a CDN.
 
-## 1. Google Sheets
-The spreadsheet ID is `12WJ241c-d2Jm_4B-BYPaeNN8K8num5dlVCQWANezsi8`. Configure it as `GOOGLE_SHEET_ID` in Render. On first successful connection, the app creates `Inventory`, `Transactions`, and `Categories` tabs with headers and default categories. Keep the spreadsheet private and share it with the service-account email as Editor.
+## Features in the current source
+- Employee landing page with Sign Out, Sign In and Add Inventory.
+- Inventory add/edit; Equipment ID equals the unique equipment name for new and edited records.
+- Sign Out lists items currently `IN`; Sign In lists items currently `OUT`.
+- Sign Out changes status to `OUT` and records the current location; Sign In changes status to `IN` and clears the assigned current location.
+- Transactions record timestamp, action, equipment, person, location and related project/requester information.
+- Dashboard totals for total, `IN`, `OUT` and categories, plus recent transactions.
+- Inventory/history search and filters; PDF/Excel export routes; print/download QR labels and camera scan-to-select.
 
-## 2. Google service account
-1. Enable the Google Sheets API in Google Cloud.
-2. Create a service account and download its JSON key.
-3. Share the spreadsheet with the service account email as Editor.
-4. In Render Environment, add `GOOGLE_SERVICE_ACCOUNT_JSON` with the entire JSON key content. Never commit the key to GitHub or paste it into chat.
+## Access and security status — important
+- Employee routes intentionally do not require staff login, matching the assessment requirement.
+- **Management routes are currently not protected by manager authentication in this source.** `/manager` redirects to `/manager/dashboard`; inventory, history and category routes are also accessible without a manager login. A separate URL is not access control.
+- Use test/demo data only until proper manager authorization or an approved company identity/access layer is implemented.
+- The app uses CSRF form-token checks and configures HTTP-only/SameSite session cookies, but these do not replace authentication and authorization.
+- The person name is entered on the form and is not independently verified. Concurrent writes are not fully atomic with Google Sheets and an in-process lock.
+- A Google Sheets read-quota (429) error occurred during setup/testing. Avoid repeated refreshes and monitor Render logs.
 
-## 3. Configure the manager password
-Install the requirements locally, then run:
+## Google Sheets configuration
+The current spreadsheet ID is configured in Render as `GOOGLE_SHEET_ID`. The spreadsheet should remain private and be shared with the service-account email as Editor. Keep the complete service-account JSON and `SECRET_KEY` only in Render environment variables; never commit credentials to GitHub.
 
-```bash
-python -m pip install -r requirements.txt
-```
+Expected environment variables:
+- `GOOGLE_SHEET_ID`
+- `GOOGLE_SERVICE_ACCOUNT_JSON`
+- `SECRET_KEY`
+- `COOKIE_SECURE=true`
 
+## Routes
+- Live employee landing page: `/`
+- Sign Out: `/movement/out`
+- Sign In: `/movement/in`
+- Manage Inventory: `/inventory`
+- Dashboard: `/manager/dashboard`
+- Transaction history: `/transactions`
+- Category management: `/categories`
 
-## 4. Render environment variables
-Configure these in Render → your service → Environment:
-- `GOOGLE_SHEET_ID` = `12WJ241c-d2Jm_4B-BYPaeNN8K8num5dlVCQWANezsi8`
-- `GOOGLE_SERVICE_ACCOUNT_JSON` = complete service account JSON (secret)
-- `SECRET_KEY` = a long random secret generated by Render or generated securely locally
-- `COOKIE_SECURE` = `true`
+## Equipment ID rule and existing data
+The Equipment ID is intended to be the exact item name, e.g. `Air Scrubber 01` is its ID. Names must be unique. New equipment and edited names use this rule. The Manage Inventory UI does **not** include a bulk migration action for older IDs. Before changing legacy IDs, back up the spreadsheet and carefully validate the matching transaction references; print new QR labels after an ID change.
 
-Do not add `USERS_JSON`; employee accounts are not used in this access model. Save changes and wait for Render to restart the service.
+## Ongoing costs and dashboard integration
+The design avoids introducing a separate paid database and may have zero incremental cost while existing Google Sheets access and Render/GitHub plans stay within included limits. This is not a cost guarantee: verify current plan limits, API quotas, uptime needs and any domain billing.
 
-## 5. Routes
-- Employee landing page: `/`
-- Signing out: `/movement/out`
-- Signing in: `/movement/in`
-- Add inventory: `/inventory`
-- Manager password page: `/manager`
-- Manager dashboard: `/manager/dashboard`
-- Manager history: `/transactions`
-- Manager category management: `/categories`
+The built-in dashboard calculates total, available (`IN`) and signed-out (`OUT`) counts from the shared spreadsheet. A future external dashboard could use a carefully scoped read-only JSON API or permissioned Sheets connection. A production API should include authentication, rate limiting, data validation and only expose fields the dashboard needs.
 
-## 6. Verify before sharing
-- Open `/` in a private/incognito window: no employee login should be required.
-- Submit a test movement and confirm a row appears in `Transactions` and status changes in `Inventory`.
-- Open `/manager/dashboard` without a manager session: it should redirect to `/manager`.
-- Log in at `/manager` and verify dashboard, history and categories work.
-- Check that signing OUT only offers equipment currently IN, and signing IN only offers equipment currently OUT.
-- Do not use real inventory until those checks pass.
-
-## Important limitations
-- This is a starter implementation, not a security-certified system. Since employee actions are unauthenticated, malicious or accidental submissions are possible. If that is unacceptable, require employee login or add an access restriction such as a company VPN/identity gateway.
-- Render free services may sleep and have usage limits. Google Sheets retains data, but Sheets is not a transactional database. A narrow race condition can occur if two users submit conflicting movements simultaneously. For strict concurrency guarantees, migrate to a transactional database.
-- Back up the spreadsheet regularly. Restrict spreadsheet sharing to the service account and approved administrators.
-
-
-## QR labels and scan-to-select
-- Each inventory record has a QR label generated from its Equipment ID. The PNG is generated on demand; no extra columns or image files are stored in Google Sheets.
-- New inventory records show their QR label immediately after creation. Existing records have a QR label link in the inventory table; the label page supports printing and downloading the PNG.
-- Sign In and Sign Out pages include a camera scanner. Scan-to-select only succeeds when the scanned item is currently eligible for that action (OUT for Sign In, IN for Sign Out).
-- QR generation uses the Python `qrcode[pil]` package. Camera scanning uses `html5-qrcode` from a CDN, so the browser needs internet access, camera permission, and HTTPS (Render provides HTTPS).
-- The QR code encodes the Equipment ID only. It does not contain employee, project, or location data.
-
-
-## Equipment ID rule
-- The Equipment ID is the exact equipment name (for example, `Air Scrubber 01` has ID `Air Scrubber 01`). Equipment names must be unique.
-- New equipment is created with `Equipment ID = Item Name`. Editing the item name updates the Equipment ID and matching transaction ID references.
-- On the Manage Inventory page, use **Synchronize existing Equipment IDs to names** to convert existing records from older ID formats. This updates Inventory IDs and matching `Transactions` Equipment ID references. Historical transaction Item Name values are preserved.
-- Print or download new QR labels after synchronizing IDs, because QR codes encode the Equipment ID.
+## Before wider use
+- Test the full sign-out → status/location update → sign-in → history sequence.
+- Test QR scan on both movement screens.
+- Test filtered PDF/Excel output against the visible filtered rows.
+- Test one transaction with more than 14 items; verify every item's status and history row.
+- Test with realistic inventory volume and inspect quota errors.
+- Add management authorization, strengthen multi-user consistency, document backup/restore and complete end-to-end tests.
