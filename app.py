@@ -261,42 +261,6 @@ def inventory_qr_label():
     return render_template('qr_label.html', item=item)
 
 
-@app.route('/inventory/qr.png')
-def inventory_qr_image():
-    """Generate a scannable QR PNG containing the item's Equipment ID."""
-    equipment_id = request.args.get('equipment_id', '').strip()
-    if not equipment_id or len(equipment_id) > 200:
-        abort(404)
-    image = qrcode.make(equipment_id)
-    output = BytesIO()
-    image.save(output, format='PNG')
-    output.seek(0)
-    safe_name = ''.join(ch if ch.isalnum() or ch in ('-', '_') else '_' for ch in equipment_id)[:80] or 'equipment'
-    return send_file(
-        output,
-        mimetype='image/png',
-        as_attachment=request.args.get('download') == '1',
-        download_name=f"{safe_name}_QR.png",
-        max_age=0,
-    )
-
-
-@app.route('/inventory/qr-label')
-def inventory_qr_label():
-    """Printable QR label; display fields are passed from the inventory row."""
-    equipment_id = request.args.get('equipment_id', '').strip()
-    if not equipment_id or len(equipment_id) > 200:
-        abort(404)
-    item = {
-        'Equipment ID': equipment_id,
-        'Item Name': request.args.get('name', '').strip() or equipment_id,
-        'Category': request.args.get('category', '').strip() or '—',
-        'Current Status': request.args.get('status', '').strip() or '—',
-        'Current Location': request.args.get('location', '').strip() or '',
-    }
-    return render_template('qr_label.html', item=item)
-
-
 @app.route('/inventory/edit', methods=['GET','POST'])
 def inventory_edit():
     equipment_id = request.args.get('equipment_id', '').strip()
