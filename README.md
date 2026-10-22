@@ -63,3 +63,11 @@ Do not add `USERS_JSON`; employee accounts are not used in this access model. Sa
 - This is a starter implementation, not a security-certified system. Since employee actions are unauthenticated, malicious or accidental submissions are possible. If that is unacceptable, require employee login or add an access restriction such as a company VPN/identity gateway.
 - Render free services may sleep and have usage limits. Google Sheets retains data, but Sheets is not a transactional database. A narrow race condition can occur if two users submit conflicting movements simultaneously. For strict concurrency guarantees, migrate to a transactional database.
 - Back up the spreadsheet regularly. Restrict spreadsheet sharing to the service account and approved administrators.
+
+
+## QR labels and scan-to-select
+- Each inventory record has a QR label generated from its Equipment ID. The PNG is generated on demand; no extra columns or image files are stored in Google Sheets.
+- New inventory records show their QR label immediately after creation. Existing records have a QR label link in the inventory table; the label page supports printing and downloading the PNG.
+- Sign In and Sign Out pages include a camera scanner. Scan-to-select only succeeds when the scanned item is currently eligible for that action (OUT for Sign In, IN for Sign Out).
+- QR generation uses the Python `qrcode[pil]` package. Camera scanning uses `html5-qrcode` from a CDN, so the browser needs internet access, camera permission, and HTTPS (Render provides HTTPS).
+- The QR code encodes the Equipment ID only. It does not contain employee, project, or location data.
