@@ -178,53 +178,6 @@ def inventory_add():
     return render_template('inventory.html', categories=categories, inventory=inventory_view, new_item=new_item)
 
 
-@app.route('/inventory/sync-ids', methods=['POST'])
-def inventory_sync_ids():
-    """One-time migration: make existing Equipment IDs equal their item names."""
-    try:
-        book, inventory, transactions, categories = get_data()
-        with LOCK:
-            names = [str(item.get('Item Name', '')).strip() for item in inventory]
-            if any(not name for name in names):
-                flash('Cannot synchronize IDs: every inventory item must have a name.', 'error')
-            elif len({name.casefold() for name in names}) != len(names):
-                flash('Cannot synchronize IDs because item names are not unique. Rename duplicate items first.', 'error')
-            else:
-                mapping = {
-                    str(item.get('Equipment ID', '')).strip(): str(item.get('Item Name', '')).strip()
-                    for item in inventory
-                }
-                ids_changed = any(old_id != new_id for old_id, new_id in mapping.items())
-                if not ids_changed:
-                    flash('All Equipment IDs already match their equipment names.', 'success')
-                else:
-                    inventory_ws = book.worksheet('Inventory')
-                    inventory_ws.update(
-                        f"A2:A{len(inventory) + 1}",
-                        [[name] for name in names],
-                        value_input_option='RAW'
-                    )
-                    if transactions:
-                        tx_ids = [
-                            mapping.get(str(t.get('Equipment ID', '')).strip(), str(t.get('Equipment ID', '')).strip())
-                            for t in transactions
-                        ]
-                        if any(
-                            new_id != str(t.get('Equipment ID', '')).strip()
-                            for t, new_id in zip(transactions, tx_ids)
-                        ):
-                            book.worksheet('Transactions').update(
-                                f"D2:D{len(tx_ids) + 1}",
-                                [[equipment_id] for equipment_id in tx_ids],
-                                value_input_option='RAW'
-                            )
-                    flash(f'Updated {len(inventory)} equipment IDs to match their names. Existing transaction references were updated where a matching inventory record was found.', 'success')
-    except Exception as e:
-        app.logger.exception('Unable to synchronize Equipment IDs')
-        flash(f'Unable to synchronize Equipment IDs: {e}', 'error')
-    return redirect(url_for('inventory_add'))
-
-
 @app.route('/inventory/qr.png')
 def inventory_qr_image():
     """Generate a scannable QR PNG containing the item's Equipment ID."""
